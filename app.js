@@ -3,6 +3,7 @@ const bodyParser = require("body-parser");
 const mongoose = require("mongoose");
 const cookieParser = require("cookie-parser");
 const session = require("express-session");
+//let session = require('cookie-session');
 const jwt = require("jsonwebtoken");
 const bcrypt = require("bcrypt");
 const Instructor = require("./models/Instructor");
@@ -227,7 +228,7 @@ app.post("/UpdateCourse/:courseId", (req, res) => {
 
 //////////////////////Student Side
 
-app.post("/api/register", (req, res) => {
+/*app.post("/api/register", (req, res) => {
   let StudentName = req.body.StudentName;
   let StudentPassword = req.body.StudentPassword;
 
@@ -288,7 +289,7 @@ app.post("/api/login", (req, res) => {
     });
 });*/
 
-app.post("/api/login", (req, res) => {
+/*app.post("/api/login", (req, res) => {
   const StudentName = req.body.StudentName;
   const StudentPassword = req.body.StudentPassword;
 
@@ -424,7 +425,131 @@ app.post("/login", (req, res) => {
           res.send(err);
         });
     });
+});*/
+
+
+
+
+///////////Student Side
+
+app.post("/api/register", (req, res) => {
+  let StudentName = req.body.StudentName;
+  let StudentPassword = req.body.StudentPassword;
+
+  bcrypt.hash(StudentPassword, saltRounds).then((encryptedpassword) => {
+    Student.create({
+      StudentName: StudentName,
+      StudentPassword: encryptedpassword,
+    }).then((createdStudent) => {
+      // res.json("created successfully");
+      const token = jwt.sign({ createdStudent }, process.env.JWT_SECRET, {
+        expiresIn: "1h",
+      });
+      res.json({ Student: createdStudent, token: token });
+    });
+  });
 });
+app.post("/api/login", (req, res) => {
+  const StudentName = req.body.StudentName;
+  const StudentPassword = req.body.StudentPassword;
+
+  Student.findOne({ StudentName })
+    .select("+StudentPassword")
+    .then((foundStudent) => {
+      if (!foundStudent) {
+        res.status(401).json({ errorMessage: "incorrect StudentName" });
+        return;
+      }
+
+      const encryptedPassword = foundStudent.StudentPassword;
+
+      bcrypt
+        .compare(StudentPassword, encryptedPassword)
+        .then((response) => {
+          if (response == true) {
+            const token = jwt.sign(
+              {
+                studentLog: {
+                  StudentName: foundStudent.StudentName,
+                  id: foundStudent._id,
+                },
+              },
+              process.env.JWT_SECRET,
+              {
+                expiresIn: "1h",
+              }
+            );
+            res.json({ Student: foundStudent, token: token });
+          } else {
+            res.status(401).json({ errorMessage: "incorrect password" });
+          }
+        })
+        .catch((errorMessage) => {
+          res.status(401).json({ errorMessage });
+        });
+    })
+    .catch((errorMessage) => {
+      res.status(401).json({ errorMessage });
+    });
+});
+
+//student Register In Courses
+app.post("/studentRegisterInCourses", isLoggedIn, function (req, res) {
+  let courseId = req.body.courseID;
+  const object = res.locals.object;
+  const studentLog = object.studentLog.id;
+  Course.findById(courseId).then((returnedcourse) => {
+    Student.findById(studentLog).then((foundStudent) => {
+      foundStudent.courses.push(courseId);
+      returnedcourse.students.push(foundStudent);
+      returnedcourse.save().then(() => {
+        foundStudent
+          .save()
+          .then((value) => {
+            value.populate("courses").then((students) => {
+              res.json({ students });
+            });
+          })
+          .catch((error) => {
+            res.status(401).json({ errorMessage: error.message });
+          });
+      });
+    });
+  });
+});
+// list all courses for Student
+app.get("/api/Student/:studentId/allCourses", isLoggedIn, (req, res) => {
+  try {
+    const object = res.locals.object;
+    res.locals.object = object;
+
+    if (object.studentLog.id != req.params.studentId) {
+      return res.json({ errorMessage: "unauthorized" });
+    }
+    const id = req.params.studentId;
+    Course.find({ students: id }).then((foundCourse) => {
+      res.status(200).json(foundCourse);
+    });
+  } catch (err) {
+    res.json({ errorMessage: err });
+  }
+});
+//cancel the registration from the course
+app.delete(
+  "/api/deleteCourse/:CourseId",
+  isLoggedIn,
+  checkBlogAuthor,
+  (req, res) => {
+    const CourseId = req.params.CourseId;
+    Course.findByIdAndDelete(CourseId)
+      .then((deleteCourse) => {
+        res.json({ deleteCourse });
+      })
+      .catch((err) => {
+        res.json({ errMessage: err });
+      });
+  }
+);
 
 // port
 app.listen(8888, () => {
